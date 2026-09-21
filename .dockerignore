@@ -1,0 +1,22 @@
+# Build output — ignore everything under target/ except the runnable fat JAR,
+# which the Dockerfile copies in (JAR is built on the host with ./mvnw package).
+target/*
+!target/*.jar
+
+# IDE / editor
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# OS files
+.DS_Store
+
+# Docs / local files not needed in the image
+HELP.md
+Dockerfile
+.dockerignore
