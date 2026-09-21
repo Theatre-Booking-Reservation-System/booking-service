@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: booking-service
+
+  # PostgreSQL. Env-var driven with local-dev defaults.
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/booking_db}
+    username: ${DB_USERNAME:theatre}
+    password: ${DB_PASSWORD:theatre}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+    # Run data.sql AFTER Hibernate creates/updates the schema.
+    defer-datasource-initialization: true
+
+  sql:
+    init:
+      mode: ${SQL_INIT_MODE:never}
+
+server:
+  port: 8083
+
+jwt:
+  secret: DbPgxPEztADVNGoeXqh2WnPT1iPrTVcGJHc6qJOqG95
+
+# OpenAPI / Swagger UI
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method

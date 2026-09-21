@@ -1,0 +1,21 @@
+# Test profile: fast in-memory H2 (PostgreSQL compatibility mode) so tests run
+# offline without a real database. Overrides the Postgres datasource in
+# src/main/resources/application.yaml.
+spring:
+  datasource:
+    url: jdbc:h2:mem:booking_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  sql:
+    init:
+      mode: never
+
+jwt:
+  secret: DbPgxPEztADVNGoeXqh2WnPT1iPrTVcGJHc6qJOqG95
