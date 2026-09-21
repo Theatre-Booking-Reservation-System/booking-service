@@ -25,7 +25,7 @@ spring:
       mode: ${SQL_INIT_MODE:never}
 
 server:
-  port: 8083
+  port: 8084
 
 jwt:
   secret: DbPgxPEztADVNGoeXqh2WnPT1iPrTVcGJHc6qJOqG95
