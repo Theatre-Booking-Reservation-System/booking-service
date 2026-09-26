@@ -25,7 +25,12 @@ spring:
       mode: ${SQL_INIT_MODE:never}
 
 server:
-  port: 8084
+  # seat-service already uses 8083; booking-service listens on 8084 to avoid a clash.
+  port: ${SERVER_PORT:8084}
+  # Served under a context path so a single ALB can route by path prefix.
+  # Overridable via CONTEXT_PATH; empty ("") serves from root for local dev.
+  servlet:
+    context-path: ${CONTEXT_PATH:/booking-service}
 
 jwt:
   secret: DbPgxPEztADVNGoeXqh2WnPT1iPrTVcGJHc6qJOqG95
