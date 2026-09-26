@@ -36,8 +36,11 @@ public class OpenApiConfig {
                         .version("v1")
                         .contact(new Contact().name("Theatre Platform Team"))
                         .license(new License().name("Apache 2.0")))
+                // Relative server URL: Swagger resolves "Try it out" against whatever
+                // host/context the docs were loaded from, so it works locally and
+                // behind the ALB context path (/booking-service) without hardcoding a host.
                 .servers(List.of(
-                        new Server().url("http://localhost:8083").description("Local development")))
+                        new Server().url("/").description("Current host")))
                 .addSecurityItem(new SecurityRequirement().addList(BEARER_SCHEME))
                 .components(new Components().addSecuritySchemes(BEARER_SCHEME,
                         new SecurityScheme()
