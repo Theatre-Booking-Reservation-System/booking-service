@@ -35,6 +35,11 @@ server:
 jwt:
   secret: DbPgxPEztADVNGoeXqh2WnPT1iPrTVcGJHc6qJOqG95
 
+# Downstream service clients
+clients:
+  catalogue:
+    base-url: ${CATALOGUE_BASE_URL:http://localhost:8082/catalogue-service}
+
 # OpenAPI / Swagger UI
 springdoc:
   api-docs:
