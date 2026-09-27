@@ -68,8 +68,9 @@ public class BookingService {
         // Enrich from catalogue (also validates the performance exists) before charging.
         PerformanceDetails performance = catalogueClient.getPerformance(request.getPerformanceId(), bearerToken);
 
-        BigDecimal total = calculateTotal(requested);
-        PaymentResult payment = paymentService.authorise(request.getPaymentDetails(), total);
+        BigDecimal total = calculateTotal(performance, requested.size());
+        PaymentResult payment = paymentService.authorise(request.getPaymentMethod(),
+                request.getPaymentDetails(), total);
 
         Booking booking = new Booking();
         booking.setBookingRef(generateBookingRef());
@@ -191,11 +192,14 @@ public class BookingService {
         }
     }
 
-    private BigDecimal calculateTotal(List<SeatSelection> seats) {
-        // Pricing is out of scope for this refactor; a flat per-seat placeholder is
-        // used so the simulated payment has a positive amount to authorise.
-        BigDecimal perSeat = new BigDecimal("1500.00");
-        return perSeat.multiply(BigDecimal.valueOf(seats.size()));
+    private BigDecimal calculateTotal(PerformanceDetails performance, int seatCount) {
+        // Base price comes from the production (catalogue-service). Ticket-type and
+        // zone-based pricing are out of scope for this refactor.
+        BigDecimal basePrice = performance != null ? performance.baseTicketCost() : null;
+        if (basePrice == null || basePrice.signum() <= 0) {
+            throw new ServiceException(ErrorCode.PERFORMANCE_LOOKUP_FAILED);
+        }
+        return basePrice.multiply(BigDecimal.valueOf(seatCount));
     }
 
     private List<BookingSeat> toBookingSeats(List<SeatSelection> seats) {

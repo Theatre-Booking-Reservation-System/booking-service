@@ -7,6 +7,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
@@ -41,7 +42,8 @@ public class CatalogueClient {
                     .body(ProductionPayload.class);
 
             String title = production != null ? production.title() : null;
-            return new PerformanceDetails(title, performance.date(), performance.time());
+            BigDecimal baseTicketCost = production != null ? production.baseTicketCost() : null;
+            return new PerformanceDetails(title, baseTicketCost, performance.date(), performance.time());
         } catch (ServiceException e) {
             throw e;
         } catch (Exception e) {
@@ -55,13 +57,14 @@ public class CatalogueClient {
         }
     }
 
-    public record PerformanceDetails(String productionName, LocalDate date, LocalTime time) {
+    public record PerformanceDetails(String productionName, BigDecimal baseTicketCost,
+                                     LocalDate date, LocalTime time) {
     }
 
     // Minimal projections of the catalogue responses (extra fields are ignored).
     private record PerformancePayload(UUID performanceId, UUID productionId, LocalDate date, LocalTime time) {
     }
 
-    private record ProductionPayload(UUID productionId, String title) {
+    private record ProductionPayload(UUID productionId, String title, BigDecimal baseTicketCost) {
     }
 }
