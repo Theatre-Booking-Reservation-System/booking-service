@@ -4,7 +4,9 @@ import com.theatre.bookingservice.config.AuthenticatedUser;
 import com.theatre.bookingservice.model.BookingListResponse;
 import com.theatre.bookingservice.model.BookingRequest;
 import com.theatre.bookingservice.model.BookingResponse;
+import com.theatre.bookingservice.model.BookingSummaryResponse;
 import com.theatre.bookingservice.model.PerformanceBookedSeatsResponse;
+import com.theatre.bookingservice.model.RecentBookingsResponse;
 import com.theatre.bookingservice.service.BookingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
@@ -91,6 +94,37 @@ public class BookingController {
     public ResponseEntity<PerformanceBookedSeatsResponse> getBookingsByPerformanceId(
             @Parameter(description = "Unique identifier of the performance") @PathVariable UUID id) {
         return ResponseEntity.ok(bookingService.getBookingsByPerformanceId(id));
+    }
+
+    @Operation(summary = "Recent bookings (admin dashboard)",
+            description = "Returns the most recent bookings across all patrons, most recent first, for "
+                    + "the admin dashboard 'Recent Bookings' widget. Each row is enriched with the "
+                    + "customer name and the show name / performance date-time. Defaults to 5 rows; "
+                    + "override with the 'limit' query parameter.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Recent bookings returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT")
+    })
+    @GetMapping("/bookings/recent")
+    public ResponseEntity<RecentBookingsResponse> getRecentBookings(
+            @Parameter(description = "Maximum number of bookings to return (default 5)")
+            @RequestParam(defaultValue = "5") int limit,
+            @Parameter(hidden = true) @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false)
+            String authorization) {
+        return ResponseEntity.ok(bookingService.getRecentBookings(limit, authorization));
+    }
+
+    @Operation(summary = "Booking summary (admin dashboard)",
+            description = "Returns aggregate figures for the admin dashboard: total (active) bookings, "
+                    + "total paid revenue and a per-month bookings/revenue breakdown for the "
+                    + "'Booking Overview' chart (current month plus the prior five).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Summary returned"),
+            @ApiResponse(responseCode = "401", description = "Missing or invalid JWT")
+    })
+    @GetMapping("/bookings/summary")
+    public ResponseEntity<BookingSummaryResponse> getSummary() {
+        return ResponseEntity.ok(bookingService.getSummary());
     }
 
     @Operation(summary = "Cancel a booking",

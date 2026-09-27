@@ -7,8 +7,12 @@ import com.theatre.bookingservice.model.BookingListResponse;
 import com.theatre.bookingservice.model.BookingRequest;
 import com.theatre.bookingservice.model.BookingResponse;
 import com.theatre.bookingservice.model.BookingSeatItem;
+import com.theatre.bookingservice.model.BookingSummaryResponse;
+import com.theatre.bookingservice.model.MonthlyBookingPoint;
 import com.theatre.bookingservice.model.PaymentDetails;
 import com.theatre.bookingservice.model.PerformanceBookedSeatsResponse;
+import com.theatre.bookingservice.model.RecentBookingItem;
+import com.theatre.bookingservice.model.RecentBookingsResponse;
 import com.theatre.bookingservice.model.SeatSelection;
 import com.theatre.bookingservice.repository.BookingRepository;
 import com.theatre.bookingservice.repository.model.Booking;
@@ -22,15 +26,23 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -46,9 +58,18 @@ public class BookingService {
     private static final List<BookingStatus> ACTIVE_STATES =
             List.of(BookingStatus.PENDING, BookingStatus.CONFIRMED);
 
+    // Default number of most-recent bookings to return to the dashboard widget.
+    private static final int DEFAULT_RECENT_LIMIT = 5;
+
+    // Number of months to include in the "Booking Overview" chart (current + prior 5).
+    private static final int OVERVIEW_MONTHS = 6;
+
+    private static final DateTimeFormatter MONTH_KEY = DateTimeFormatter.ofPattern("yyyy-MM");
+
     private final BookingRepository bookingRepository;
     private final PaymentService paymentService;
     private final CatalogueClient catalogueClient;
+    private final IdentityClient identityClient;
     private final QrCodeService qrCodeService;
 
     /**
@@ -106,6 +127,117 @@ public class BookingService {
 
         return BookingListResponse.builder()
                 .bookings(bookings)
+                .build();
+    }
+
+    public RecentBookingsResponse getRecentBookings(int limit, String bearerToken) {
+        int capped = limit > 0 ? limit : DEFAULT_RECENT_LIMIT;
+        List<Booking> bookings =
+                bookingRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(0, capped));
+
+        Map<UUID, String> patronNames = resolvePatronNames(bookings, bearerToken);
+        Map<UUID, PerformanceDetails> performances = resolvePerformances(bookings, bearerToken);
+
+        List<RecentBookingItem> rows = bookings.stream()
+                .map(booking -> toRecentBookingItem(booking, patronNames, performances))
+                .toList();
+
+        return RecentBookingsResponse.builder()
+                .bookings(rows)
+                .build();
+    }
+
+    public BookingSummaryResponse getSummary() {
+        long totalBookings = bookingRepository.countByStatuses(ACTIVE_STATES);
+        BigDecimal totalRevenue = bookingRepository.sumPaidRevenue();
+
+        return BookingSummaryResponse.builder()
+                .totalBookings(totalBookings)
+                .totalRevenue(totalRevenue != null ? totalRevenue : BigDecimal.ZERO)
+                .bookingOverview(buildBookingOverview())
+                .build();
+    }
+
+    private List<MonthlyBookingPoint> buildBookingOverview() {
+        YearMonth currentMonth = YearMonth.now(ZoneOffset.UTC);
+        YearMonth firstMonth = currentMonth.minusMonths(OVERVIEW_MONTHS - 1L);
+
+        // Seed an ordered bucket per month so months with no bookings still appear.
+        Map<YearMonth, long[]> counts = new LinkedHashMap<>();
+        Map<YearMonth, BigDecimal> revenue = new LinkedHashMap<>();
+        for (int i = 0; i < OVERVIEW_MONTHS; i++) {
+            YearMonth month = firstMonth.plusMonths(i);
+            counts.put(month, new long[]{0});
+            revenue.put(month, BigDecimal.ZERO);
+        }
+
+        OffsetDateTime from = firstMonth.atDay(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        List<Booking> bookings =
+                bookingRepository.findByCreatedAtGreaterThanEqualAndStatusIn(from, ACTIVE_STATES);
+
+        for (Booking booking : bookings) {
+            YearMonth month = YearMonth.from(booking.getCreatedAt().atZoneSameInstant(ZoneOffset.UTC));
+            long[] bucket = counts.get(month);
+            if (bucket == null) {
+                continue; // defensive: outside the window
+            }
+            bucket[0]++;
+            if (booking.getPaymentStatus() == PaymentStatus.PAID && booking.getTotalLkr() != null) {
+                revenue.merge(month, booking.getTotalLkr(), BigDecimal::add);
+            }
+        }
+
+        List<MonthlyBookingPoint> overview = new ArrayList<>(OVERVIEW_MONTHS);
+        for (Map.Entry<YearMonth, long[]> entry : counts.entrySet()) {
+            YearMonth month = entry.getKey();
+            overview.add(MonthlyBookingPoint.builder()
+                    .month(month.format(MONTH_KEY))
+                    .label(month.getMonth().getDisplayName(TextStyle.SHORT, Locale.ENGLISH))
+                    .bookings(entry.getValue()[0])
+                    .revenue(revenue.get(month))
+                    .build());
+        }
+        return overview;
+    }
+
+    private Map<UUID, String> resolvePatronNames(List<Booking> bookings, String bearerToken) {
+        List<UUID> patronIds = bookings.stream()
+                .map(Booking::getPatronId)
+                .distinct()
+                .toList();
+        return identityClient.getPatronNames(patronIds, bearerToken);
+    }
+
+    private Map<UUID, PerformanceDetails> resolvePerformances(List<Booking> bookings, String bearerToken) {
+        Map<UUID, PerformanceDetails> performances = new HashMap<>();
+        for (UUID performanceId : bookings.stream().map(Booking::getPerformanceId).distinct().toList()) {
+            try {
+                performances.put(performanceId, catalogueClient.getPerformance(performanceId, bearerToken));
+            } catch (RuntimeException e) {
+                // Best-effort: leave the show details null if the lookup fails.
+                performances.put(performanceId, null);
+            }
+        }
+        return performances;
+    }
+
+    private RecentBookingItem toRecentBookingItem(Booking booking,
+                                                  Map<UUID, String> patronNames,
+                                                  Map<UUID, PerformanceDetails> performances) {
+        PerformanceDetails performance = performances.get(booking.getPerformanceId());
+        return RecentBookingItem.builder()
+                .bookingId(booking.getBookingId())
+                .bookingRef(booking.getBookingRef())
+                .patronId(booking.getPatronId())
+                .customerName(patronNames.get(booking.getPatronId()))
+                .performanceId(booking.getPerformanceId())
+                .showName(performance != null ? performance.productionName() : null)
+                .performanceDate(performance != null ? performance.date() : null)
+                .performanceTime(performance != null ? performance.time() : null)
+                .totalLkr(booking.getTotalLkr())
+                .status(booking.getStatus())
+                .paymentStatus(booking.getPaymentStatus())
+                .createdAt(booking.getCreatedAt())
                 .build();
     }
 

@@ -39,6 +39,8 @@ jwt:
 clients:
   catalogue:
     base-url: ${CATALOGUE_BASE_URL:http://localhost:8082/catalogue-service}
+  identity:
+    base-url: ${IDENTITY_BASE_URL:http://localhost:8081/identity-service}
 
 # OpenAPI / Swagger UI
 springdoc:
