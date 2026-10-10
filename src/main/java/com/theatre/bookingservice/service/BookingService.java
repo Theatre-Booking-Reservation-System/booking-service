@@ -19,9 +19,12 @@ import com.theatre.bookingservice.repository.model.Booking;
 import com.theatre.bookingservice.repository.model.BookingSeat;
 import com.theatre.bookingservice.service.CatalogueClient.PerformanceDetails;
 import com.theatre.bookingservice.service.PaymentService.PaymentResult;
+import com.theatre.bookingservice.service.SeatZoneClient.ZonePricing;
 import com.theatre.bookingservice.util.BookingStatus;
 import com.theatre.bookingservice.util.ErrorCode;
 import com.theatre.bookingservice.util.PaymentStatus;
+import com.theatre.bookingservice.util.SessionType;
+import com.theatre.bookingservice.util.TicketType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -66,10 +70,14 @@ public class BookingService {
 
     private static final DateTimeFormatter MONTH_KEY = DateTimeFormatter.ofPattern("yyyy-MM");
 
+    // Flat per-booking fee
+    private static final BigDecimal BOOKING_FEE = BigDecimal.valueOf(100);
+
     private final BookingRepository bookingRepository;
     private final PaymentService paymentService;
     private final CatalogueClient catalogueClient;
     private final IdentityClient identityClient;
+    private final SeatZoneClient seatZoneClient;
     private final QrCodeService qrCodeService;
 
     /**
@@ -89,7 +97,10 @@ public class BookingService {
         // Enrich from catalogue (also validates the performance exists) before charging.
         PerformanceDetails performance = catalogueClient.getPerformance(request.getPerformanceId(), bearerToken);
 
-        BigDecimal total = calculateTotal(performance, requested.size());
+        // Zone uplift percentages (keyed by zone name) drive the per-seat price
+        Map<String, ZonePricing> zonePricing = seatZoneClient.getZonePricingByName(bearerToken);
+
+        BigDecimal total = calculateTotal(performance, requested, request.getTicketType(), zonePricing);
         PaymentResult payment = paymentService.authorise(request.getPaymentMethod(),
                 request.getPaymentDetails(), total);
 
@@ -324,14 +335,67 @@ public class BookingService {
         }
     }
 
-    private BigDecimal calculateTotal(PerformanceDetails performance, int seatCount) {
-        // Base price comes from the production (catalogue-service). Ticket-type and
-        // zone-based pricing are out of scope for this refactor.
+    /**
+     * Computes the booking total
+     * <ol>
+     *   <li>Per seat: {@code round(basePrice * (1 + pct/100))}, where {@code pct} is the
+     *       seat's zone matinee/evening uplift (matinee vs evening chosen by the
+     *       performance session type). An unknown zone falls back to 0% uplift.</li>
+     *   <li>{@code subtotal} = sum of per-seat prices.</li>
+     *   <li>{@code discount} = {@code round(subtotal * concessionRate)}, where the rate is
+     *       derived from the ticket type (GROUP = 20%, LOYALTY = 10%, otherwise 0%).</li>
+     *   <li>{@code bookingFee} = flat 100 LKR when at least one seat is booked.</li>
+     *   <li>{@code total} = {@code subtotal - discount + bookingFee}.</li>
+     * </ol>
+     */
+    private BigDecimal calculateTotal(PerformanceDetails performance,
+                                      List<SeatSelection> seats,
+                                      TicketType ticketType,
+                                      Map<String, ZonePricing> zonePricing) {
         BigDecimal basePrice = performance != null ? performance.baseTicketCost() : null;
         if (basePrice == null || basePrice.signum() <= 0) {
             throw new ServiceException(ErrorCode.PERFORMANCE_LOOKUP_FAILED);
         }
-        return basePrice.multiply(BigDecimal.valueOf(seatCount));
+
+        boolean matinee = performance.sessionType() == SessionType.MATINEE;
+
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (SeatSelection seat : seats) {
+            subtotal = subtotal.add(seatPrice(basePrice, seat.getZoneName(), matinee, zonePricing));
+        }
+
+        BigDecimal discountRate = concessionRate(ticketType);
+        BigDecimal discount = subtotal.multiply(discountRate).setScale(0, RoundingMode.HALF_UP);
+        BigDecimal bookingFee = seats.isEmpty() ? BigDecimal.ZERO : BOOKING_FEE;
+
+        return subtotal.subtract(discount).add(bookingFee);
+    }
+
+    /** Per-seat gross price: base cost uplifted by the zone's matinee/evening percentage. */
+    private BigDecimal seatPrice(BigDecimal basePrice, String zoneName, boolean matinee,
+                                 Map<String, ZonePricing> zonePricing) {
+        ZonePricing zone = zoneName != null ? zonePricing.get(zoneName) : null;
+        BigDecimal pct = BigDecimal.ZERO;
+        if (zone != null) {
+            BigDecimal selected = matinee ? zone.matineePct() : zone.eveningPct();
+            if (selected != null) {
+                pct = selected;
+            }
+        }
+        // price = round(base * (1 + pct/100))
+        BigDecimal multiplier = BigDecimal.ONE.add(pct.movePointLeft(2));
+        return basePrice.multiply(multiplier).setScale(0, RoundingMode.HALF_UP);
+    }
+
+    /** Concession discount rate implied by the ticket type */
+    private BigDecimal concessionRate(TicketType ticketType) {
+        if (ticketType == TicketType.GROUP) {
+            return BigDecimal.valueOf(0.20);
+        }
+        if (ticketType == TicketType.LOYALTY) {
+            return BigDecimal.valueOf(0.10);
+        }
+        return BigDecimal.ZERO;
     }
 
     private List<BookingSeat> toBookingSeats(List<SeatSelection> seats) {

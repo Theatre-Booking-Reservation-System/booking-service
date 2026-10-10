@@ -2,6 +2,7 @@ package com.theatre.bookingservice.service;
 
 import com.theatre.bookingservice.exception.ServiceException;
 import com.theatre.bookingservice.util.ErrorCode;
+import com.theatre.bookingservice.util.SessionType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
@@ -43,7 +44,8 @@ public class CatalogueClient {
 
             String title = production != null ? production.title() : null;
             BigDecimal baseTicketCost = production != null ? production.baseTicketCost() : null;
-            return new PerformanceDetails(title, baseTicketCost, performance.date(), performance.time());
+            return new PerformanceDetails(title, baseTicketCost, performance.date(), performance.time(),
+                    performance.sessionType());
         } catch (ServiceException e) {
             throw e;
         } catch (Exception e) {
@@ -58,11 +60,12 @@ public class CatalogueClient {
     }
 
     public record PerformanceDetails(String productionName, BigDecimal baseTicketCost,
-                                     LocalDate date, LocalTime time) {
+                                     LocalDate date, LocalTime time, SessionType sessionType) {
     }
 
     // Minimal projections of the catalogue responses (extra fields are ignored).
-    private record PerformancePayload(UUID performanceId, UUID productionId, LocalDate date, LocalTime time) {
+    private record PerformancePayload(UUID performanceId, UUID productionId, LocalDate date, LocalTime time,
+                                      SessionType sessionType) {
     }
 
     private record ProductionPayload(UUID productionId, String title, BigDecimal baseTicketCost) {
